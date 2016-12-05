@@ -1830,10 +1830,7 @@ public class JmDNSImpl extends JmDNS implements DNSStatefulObject, DNSTaskStarte
         for (DNSEntry entry : this.getCache().allValues()) {
             try {
                 DNSRecord record = (DNSRecord) entry;
-                if (record.isExpired(now)) {
-                    this.updateRecord(now, record, Operation.Remove);
-                    this.getCache().removeDNSEntry(record);
-                } else if (record.isStaleAndShouldBeRefreshed(now)) {
+                if (record.isStaleAndShouldBeRefreshed(now)) {
                     record.incrementRefreshPercentage();
                     String type = record.getServiceInfo().getType().toLowerCase();
                     // only query every service type once per refresh
@@ -1841,6 +1838,10 @@ public class JmDNSImpl extends JmDNS implements DNSStatefulObject, DNSTaskStarte
                         // we should query for the record we care about i.e. those in the service collectors
                         this.renewServiceCollector(type);
                     }
+                }                
+                if (record.isExpired(now)) {
+                    this.updateRecord(now, record, Operation.Remove);
+                    this.getCache().removeDNSEntry(record);
                 }
             } catch (Exception exception) {
                 logger.warn(this.getName() + ".Error while reaping records: " + entry, exception);
