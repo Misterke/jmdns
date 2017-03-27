@@ -998,8 +998,16 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener, DNSStat
                 if (record.getName().equalsIgnoreCase(this.getServer())) {
                     final DNSRecord.Address address = (DNSRecord.Address) record;
                     if (address.getAddress() instanceof Inet4Address) {
+                        //  We want the latest announced address to always be the last
+                        //  in the set (since we use a set with defined ordering), so
+                        //  that users know what IP address is most likely the correct
+                        //  one.  To get that behavior, we need to first remove the
+                        //  address, just in case it was already there.
                         final Inet4Address inet4Address = (Inet4Address) address.getAddress();
-                        if(_ipv4Addresses.add(inet4Address)) {
+                        final Inet4Address[] addrArr = _ipv4Addresses.toArray(new Inet4Address[0]);
+                        if ((addrArr.length == 0) || !addrArr[addrArr.length-1].equals(inet4Address)) {
+                            _ipv4Addresses.remove(inet4Address);
+                            _ipv4Addresses.add(inet4Address);
                             serviceUpdated = true;
                         }
                     }
@@ -1010,7 +1018,10 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener, DNSStat
                     final DNSRecord.Address address = (DNSRecord.Address) record;
                     if (address.getAddress() instanceof Inet6Address) {
                         final Inet6Address inet6Address = (Inet6Address) address.getAddress();
-                        if(_ipv6Addresses.add(inet6Address)) {
+                        final Inet6Address[] addrArr = _ipv6Addresses.toArray(new Inet6Address[0]);
+                        if ((addrArr.length == 0) || !addrArr[addrArr.length-1].equals(inet6Address)) {
+                            _ipv6Addresses.remove(inet6Address);
+                            _ipv6Addresses.add(inet6Address);
                             serviceUpdated = true;
                         }
                     }
