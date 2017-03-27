@@ -890,13 +890,22 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener, DNSStat
             switch (rec.getRecordType()) {
                 case TYPE_A: // IPv4
                     if (rec.getName().equalsIgnoreCase(this.getServer())) {
-                        _ipv4Addresses.add((Inet4Address) ((DNSRecord.Address) rec).getAddress());
+                        //  We want the latest announced address to always be the last
+                        //  in the set (since we use a set with defined ordering), so
+                        //  that users know what IP address is most likely the correct
+                        //  one.  To get that behavior, we need to first remove the
+                        //  address, just in case it was already there.
+                        Inet4Address addr = (Inet4Address) ((DNSRecord.Address) rec).getAddress();
+                        _ipv4Addresses.remove(addr);
+                        _ipv4Addresses.add(addr);
                         serviceUpdated = true;
                     }
                     break;
                 case TYPE_AAAA: // IPv6
                     if (rec.getName().equalsIgnoreCase(this.getServer())) {
-                        _ipv6Addresses.add((Inet6Address) ((DNSRecord.Address) rec).getAddress());
+                        Inet6Address addr = (Inet6Address) ((DNSRecord.Address) rec).getAddress();
+                        _ipv6Addresses.remove(addr);
+                        _ipv6Addresses.add(addr);
                         serviceUpdated = true;
                     }
                     break;
