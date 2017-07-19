@@ -1257,12 +1257,14 @@ public class JmDNSImpl extends JmDNS implements DNSStatefulObject, DNSTaskStarte
          *
          * For details see also RFC 6762 / Section 10.4:
          * @see https://tools.ietf.org/html/rfc6762#section-10.4
+         *
+         * This however causes problems if the PTR record is received before registering the listener for
+         * this type.  The addServiceListener then only notifies the services for which a SRV record has
+         * been received, but that is not the case for this one.  Later on, the PTR + SRV is received, but
+         * as PTR is not updated, it doesn't trigger any change, so it's up to SRV to do that ...
          */
-        if (
-                DNSRecordType.TYPE_PTR.equals(rec.getRecordType())
-                || ( DNSRecordType.TYPE_SRV.equals(rec.getRecordType()) && Operation.Remove.equals(operation))
-        )
-        {
+        if (DNSRecordType.TYPE_PTR.equals(rec.getRecordType()) ||
+            DNSRecordType.TYPE_SRV.equals(rec.getRecordType())) {
             ServiceEvent event = rec.getServiceEvent(this);
             if ((event.getInfo() == null) || !event.getInfo().hasData()) {
                 // We do not care about the subtype because the info is only used if complete and the subtype will then be included.
