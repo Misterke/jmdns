@@ -314,147 +314,152 @@ public final class DNSIncoming extends DNSMessage {
         int len = _messageInputStream.readUnsignedShort();
         DNSRecord rec = null;
 
-        switch (type) {
-            case TYPE_A: // IPv4
-                rec = new DNSRecord.IPv4Address(domain, recordClass, unique, ttl, _messageInputStream.readBytes(len));
-                break;
-            case TYPE_AAAA: // IPv6
-                rec = new DNSRecord.IPv6Address(domain, recordClass, unique, ttl, _messageInputStream.readBytes(len));
-                break;
-            case TYPE_CNAME:
-            case TYPE_PTR:
-                String service = "";
-                service = _messageInputStream.readName();
-                if (service.length() > 0) {
-                    rec = new DNSRecord.Pointer(domain, recordClass, unique, ttl, service);
-                } else {
-                    logger.warn("PTR record of class: " + recordClass + ", there was a problem reading the service name of the answer for domain:" + domain);
-                }
-                break;
-            case TYPE_TXT:
-                rec = new DNSRecord.Text(domain, recordClass, unique, ttl, _messageInputStream.readBytes(len));
-                break;
-            case TYPE_SRV:
-                int priority = _messageInputStream.readUnsignedShort();
-                int weight = _messageInputStream.readUnsignedShort();
-                int port = _messageInputStream.readUnsignedShort();
-                String target = "";
-                // This is a hack to handle a bug in the BonjourConformanceTest
-                // It is sending out target strings that don't follow the "domain name" format.
-                if (USE_DOMAIN_NAME_FORMAT_FOR_SRV_TARGET) {
-                    target = _messageInputStream.readName();
-                } else {
-                    // [PJYF Nov 13 2010] Do we still need this? This looks really bad. All label are supposed to start by a length.
-                    target = _messageInputStream.readNonNameString();
-                }
-                rec = new DNSRecord.Service(domain, recordClass, unique, ttl, priority, weight, port, target);
-                break;
-            case TYPE_HINFO:
-                StringBuilder buf = new StringBuilder();
-                buf.append(_messageInputStream.readUTF(len));
-                int index = buf.indexOf(" ");
-                String cpu = (index > 0 ? buf.substring(0, index) : buf.toString()).trim();
-                String os = (index > 0 ? buf.substring(index + 1) : "").trim();
-                rec = new DNSRecord.HostInformation(domain, recordClass, unique, ttl, cpu, os);
-                break;
-            case TYPE_OPT:
-                DNSResultCode extendedResultCode = DNSResultCode.resultCodeForFlags(this.getFlags(), ttl);
-                int version = (ttl & 0x00ff0000) >> 16;
-                if (version == 0) {
-                    _senderUDPPayload = recordClassIndex;
-                    while (_messageInputStream.available() > 0) {
-                        // Read RDData
-                        int optionCodeInt = 0;
-                        DNSOptionCode optionCode = null;
-                        if (_messageInputStream.available() >= 2) {
-                            optionCodeInt = _messageInputStream.readUnsignedShort();
-                            optionCode = DNSOptionCode.resultCodeForFlags(optionCodeInt);
-                        } else {
-                            logger.warn("There was a problem reading the OPT record. Ignoring.");
-                            break;
-                        }
-                        int optionLength = 0;
-                        if (_messageInputStream.available() >= 2) {
-                            optionLength = _messageInputStream.readUnsignedShort();
-                        } else {
-                            logger.warn("There was a problem reading the OPT record. Ignoring.");
-                            break;
-                        }
-                        byte[] optiondata = new byte[0];
-                        if (_messageInputStream.available() >= optionLength) {
-                            optiondata = _messageInputStream.readBytes(optionLength);
-                        }
-                        //
-                        // We should really do something with those options.
-                        switch (optionCode) {
-                            case Owner:
-                                // Valid length values are 8, 14, 18 and 20
-                                // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-                                // |Opt|Len|V|S|Primary MAC|Wakeup MAC | Password |
-                                // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-                                //
-                                int ownerVersion = 0;
-                                int ownerSequence = 0;
-                                byte[] ownerPrimaryMacAddress = null;
-                                byte[] ownerWakeupMacAddress = null;
-                                byte[] ownerPassword = null;
-                                try {
-                                    ownerVersion = optiondata[0];
-                                    ownerSequence = optiondata[1];
-                                    ownerPrimaryMacAddress = new byte[] { optiondata[2], optiondata[3], optiondata[4], optiondata[5], optiondata[6], optiondata[7] };
-                                    ownerWakeupMacAddress = ownerPrimaryMacAddress;
-                                    if (optiondata.length > 8) {
-                                        // We have a wakeupMacAddress.
-                                        ownerWakeupMacAddress = new byte[] { optiondata[8], optiondata[9], optiondata[10], optiondata[11], optiondata[12], optiondata[13] };
-                                    }
-                                    if (optiondata.length == 18) {
-                                        // We have a short password.
-                                        ownerPassword = new byte[] { optiondata[14], optiondata[15], optiondata[16], optiondata[17] };
-                                    }
-                                    if (optiondata.length == 22) {
-                                        // We have a long password.
-                                        ownerPassword = new byte[] { optiondata[14], optiondata[15], optiondata[16], optiondata[17], optiondata[18], optiondata[19], optiondata[20], optiondata[21] };
-                                    }
-                                } catch (Exception exception) {
-                                    logger.warn("Malformed OPT answer. Option code: Owner data: " + this._hexString(optiondata));
-                                }
-                                if (logger.isDebugEnabled()) {
-                                    logger.debug("Unhandled Owner OPT version: " + ownerVersion + " sequence: " + ownerSequence + " MAC address: " + this._hexString(ownerPrimaryMacAddress)
-                                            + (ownerWakeupMacAddress != ownerPrimaryMacAddress ? " wakeup MAC address: " + this._hexString(ownerWakeupMacAddress) : "") + (ownerPassword != null ? " password: " + this._hexString(ownerPassword) : ""));
-                                }
-                                break;
-                            case LLQ:
-                            case NSID:
-                            case UL:
-                                if (logger.isDebugEnabled()) {
-                                    logger.debug("There was an OPT answer. Option code: " + optionCode + " data: " + this._hexString(optiondata));
-                                }
-                                break;
-                            case Unknown:
-                                if (optionCodeInt >= 65001 && optionCodeInt <= 65534) {
-                                     // RFC 6891 defines this range as used for experimental/local purposes.
-                                    if (logger.isDebugEnabled()) {
-                                        logger.debug("There was an OPT answer using an experimental/local option code: " + optionCodeInt + " data: " + this._hexString(optiondata));
-                                    }
-                                } else {
-                                    logger.warn("There was an OPT answer. Not currently handled. Option code: " + optionCodeInt + " data: " + this._hexString(optiondata));
-                                }
-                                break;
-                            default:
-                                // This is to keep the compiler happy.
-                                break;
-                        }
+        // Filter out problematic _device-id records with numbered suffixes
+        if (domain.matches(".*#[0-9]+\\._device-id\\._tcp\\.local\\.")) {
+            logger.warn("Filtering out record with problematic name: " + type + " \"" + domain + "\"");
+        } else {
+            switch (type) {
+                case TYPE_A: // IPv4
+                    rec = new DNSRecord.IPv4Address(domain, recordClass, unique, ttl, _messageInputStream.readBytes(len));
+                    break;
+                case TYPE_AAAA: // IPv6
+                    rec = new DNSRecord.IPv6Address(domain, recordClass, unique, ttl, _messageInputStream.readBytes(len));
+                    break;
+                case TYPE_CNAME:
+                case TYPE_PTR:
+                    String service = "";
+                    service = _messageInputStream.readName();
+                    if (service.length() > 0) {
+                        rec = new DNSRecord.Pointer(domain, recordClass, unique, ttl, service);
+                    } else {
+                        logger.warn("PTR record of class: " + recordClass + ", there was a problem reading the service name of the answer for domain:" + domain);
                     }
-                } else {
-                    logger.warn("There was an OPT answer. Wrong version number: " + version + " result code: " + extendedResultCode);
-                }
-                break;
-            default:
-                if (logger.isDebugEnabled()) {
-                    logger.debug("DNSIncoming() unknown type:" + type);
-                }
-                _messageInputStream.skip(len);
-                break;
+                    break;
+                case TYPE_TXT:
+                    rec = new DNSRecord.Text(domain, recordClass, unique, ttl, _messageInputStream.readBytes(len));
+                    break;
+                case TYPE_SRV:
+                    int priority = _messageInputStream.readUnsignedShort();
+                    int weight = _messageInputStream.readUnsignedShort();
+                    int port = _messageInputStream.readUnsignedShort();
+                    String target = "";
+                    // This is a hack to handle a bug in the BonjourConformanceTest
+                    // It is sending out target strings that don't follow the "domain name" format.
+                    if (USE_DOMAIN_NAME_FORMAT_FOR_SRV_TARGET) {
+                        target = _messageInputStream.readName();
+                    } else {
+                        // [PJYF Nov 13 2010] Do we still need this? This looks really bad. All label are supposed to start by a length.
+                        target = _messageInputStream.readNonNameString();
+                    }
+                    rec = new DNSRecord.Service(domain, recordClass, unique, ttl, priority, weight, port, target);
+                    break;
+                case TYPE_HINFO:
+                    StringBuilder buf = new StringBuilder();
+                    buf.append(_messageInputStream.readUTF(len));
+                    int index = buf.indexOf(" ");
+                    String cpu = (index > 0 ? buf.substring(0, index) : buf.toString()).trim();
+                    String os = (index > 0 ? buf.substring(index + 1) : "").trim();
+                    rec = new DNSRecord.HostInformation(domain, recordClass, unique, ttl, cpu, os);
+                    break;
+                case TYPE_OPT:
+                    DNSResultCode extendedResultCode = DNSResultCode.resultCodeForFlags(this.getFlags(), ttl);
+                    int version = (ttl & 0x00ff0000) >> 16;
+                    if (version == 0) {
+                        _senderUDPPayload = recordClassIndex;
+                        while (_messageInputStream.available() > 0) {
+                            // Read RDData
+                            int optionCodeInt = 0;
+                            DNSOptionCode optionCode = null;
+                            if (_messageInputStream.available() >= 2) {
+                                optionCodeInt = _messageInputStream.readUnsignedShort();
+                                optionCode = DNSOptionCode.resultCodeForFlags(optionCodeInt);
+                            } else {
+                                logger.warn("There was a problem reading the OPT record. Ignoring.");
+                                break;
+                            }
+                            int optionLength = 0;
+                            if (_messageInputStream.available() >= 2) {
+                                optionLength = _messageInputStream.readUnsignedShort();
+                            } else {
+                                logger.warn("There was a problem reading the OPT record. Ignoring.");
+                                break;
+                            }
+                            byte[] optiondata = new byte[0];
+                            if (_messageInputStream.available() >= optionLength) {
+                                optiondata = _messageInputStream.readBytes(optionLength);
+                            }
+                            //
+                            // We should really do something with those options.
+                            switch (optionCode) {
+                                case Owner:
+                                    // Valid length values are 8, 14, 18 and 20
+                                    // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                                    // |Opt|Len|V|S|Primary MAC|Wakeup MAC | Password |
+                                    // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                                    //
+                                    int ownerVersion = 0;
+                                    int ownerSequence = 0;
+                                    byte[] ownerPrimaryMacAddress = null;
+                                    byte[] ownerWakeupMacAddress = null;
+                                    byte[] ownerPassword = null;
+                                    try {
+                                        ownerVersion = optiondata[0];
+                                        ownerSequence = optiondata[1];
+                                        ownerPrimaryMacAddress = new byte[] { optiondata[2], optiondata[3], optiondata[4], optiondata[5], optiondata[6], optiondata[7] };
+                                        ownerWakeupMacAddress = ownerPrimaryMacAddress;
+                                        if (optiondata.length > 8) {
+                                            // We have a wakeupMacAddress.
+                                            ownerWakeupMacAddress = new byte[] { optiondata[8], optiondata[9], optiondata[10], optiondata[11], optiondata[12], optiondata[13] };
+                                        }
+                                        if (optiondata.length == 18) {
+                                            // We have a short password.
+                                            ownerPassword = new byte[] { optiondata[14], optiondata[15], optiondata[16], optiondata[17] };
+                                        }
+                                        if (optiondata.length == 22) {
+                                            // We have a long password.
+                                            ownerPassword = new byte[] { optiondata[14], optiondata[15], optiondata[16], optiondata[17], optiondata[18], optiondata[19], optiondata[20], optiondata[21] };
+                                        }
+                                    } catch (Exception exception) {
+                                        logger.warn("Malformed OPT answer. Option code: Owner data: " + this._hexString(optiondata));
+                                    }
+                                    if (logger.isDebugEnabled()) {
+                                        logger.debug("Unhandled Owner OPT version: " + ownerVersion + " sequence: " + ownerSequence + " MAC address: " + this._hexString(ownerPrimaryMacAddress)
+                                                + (ownerWakeupMacAddress != ownerPrimaryMacAddress ? " wakeup MAC address: " + this._hexString(ownerWakeupMacAddress) : "") + (ownerPassword != null ? " password: " + this._hexString(ownerPassword) : ""));
+                                    }
+                                    break;
+                                case LLQ:
+                                case NSID:
+                                case UL:
+                                    if (logger.isDebugEnabled()) {
+                                        logger.debug("There was an OPT answer. Option code: " + optionCode + " data: " + this._hexString(optiondata));
+                                    }
+                                    break;
+                                case Unknown:
+                                    if (optionCodeInt >= 65001 && optionCodeInt <= 65534) {
+                                        // RFC 6891 defines this range as used for experimental/local purposes.
+                                        if (logger.isDebugEnabled()) {
+                                            logger.debug("There was an OPT answer using an experimental/local option code: " + optionCodeInt + " data: " + this._hexString(optiondata));
+                                        }
+                                    } else {
+                                        logger.warn("There was an OPT answer. Not currently handled. Option code: " + optionCodeInt + " data: " + this._hexString(optiondata));
+                                    }
+                                    break;
+                                default:
+                                    // This is to keep the compiler happy.
+                                    break;
+                            }
+                        }
+                    } else {
+                        logger.warn("There was an OPT answer. Wrong version number: " + version + " result code: " + extendedResultCode);
+                    }
+                    break;
+                default:
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("DNSIncoming() unknown type:" + type);
+                    }
+                    _messageInputStream.skip(len);
+                    break;
+            }
         }
         if (rec != null) {
             rec.setRecordSource(source);
