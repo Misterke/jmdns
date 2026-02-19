@@ -11,6 +11,8 @@ import java.net.InetAddress;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Properties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.jmdns.impl.JmDNSImpl;
 
@@ -56,7 +58,7 @@ public abstract class JmDNS implements Closeable {
         } catch (Exception ignored) {
             VERSION = "VERSION MISSING";
         }
-
+        LoggerFactory.getLogger(JmDNS.class.getName()).warn("JmDNS version " + VERSION + " + DUPLICATE SERVICE PATCH");
     }
 
     /**
